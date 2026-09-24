@@ -7,12 +7,32 @@ import { defineConfig } from 'vitest/config';
 const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const extensionRoot = path.join(repoRoot, 'extension');
 
+/**
+ * Dev convenience: serve popup.html at `/` so the sandbox preview URL opens
+ * the popup directly (build output is unaffected — MV3 loads popup.html).
+ */
+function servePopupAtRoot() {
+  return {
+    name: 'pageclone-serve-popup-at-root',
+    configureServer(server: {
+      middlewares: {
+        use: (fn: (req: { url?: string }, res: never, next: () => void) => void) => void;
+      };
+    }) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url === '/' || req.url === '/index.html') req.url = '/popup.html';
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   root: extensionRoot,
   // Relative asset URLs — required for reliable loading from
   // chrome-extension:// origins (MV3 best practice).
   base: './',
-  plugins: [react()],
+  plugins: [react(), servePopupAtRoot()],
 
   resolve: {
     alias: {

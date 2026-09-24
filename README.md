@@ -3,25 +3,46 @@
 **Capture the frontend of the current page — and rebuild it as a standalone local project.**
 
 PageClone is a premium, local-first browser extension (Manifest V3). You open a page, click
-PageClone, and the extension detects the active tab. Later phases will analyze the page and
-export a complete, standalone frontend project (`index.html` + assets) as a ZIP.
+PageClone, and the extension analyzes the real page you are looking at. Later phases will
+reconstruct that analysis into a standalone frontend project (`index.html` + assets) and
+export it as a ZIP.
 
-> **Status: Phase 1 (foundation).** This release ships the production extension shell:
-> Manifest V3 wiring, current-tab detection, and the full popup UI/state architecture.
-> The actual page-cloning / reconstruction engine is **not implemented yet** — it is
-> planned for later phases (see [Roadmap](#roadmap)).
+> **Status: Phase 2 (real current-page capture & analysis engine).** The extension now
+> performs a **real analysis of the current page**: a content-script engine walks the DOM,
+> collects safe structure/styles/assets/links into a normalized, versioned `CaptureResult`,
+> and the popup shows honest statistics from that capture. It does **not** yet export a
+> standalone clone — reconstruction and ZIP export arrive in Phases 3–4 (see
+> [Roadmap](#roadmap)).
 
 ---
 
-## Features (Phase 1)
+## Features (Phase 2)
 
-- **Current-page detection** — safe tab metadata (URL, hostname, title, favicon) on popup open
-- **Premium dark popup UI** — compact, minimal, Apple-inspired design system
-- **Full state architecture** — detecting / detected / unsupported / analyzing / ready / error
-- **Honest unsupported handling** — `chrome://`, `about:`, store pages and other browser-internal
-  pages are classified and explained, never probed or bypassed
-- **Local-first & least-privilege** — the only permission is `tabs`; nothing leaves your machine
-- **Production toolchain** — TypeScript, React 19, Vite 8, ESLint, Prettier, Vitest, CI
+- **Real current-page analysis** — content-script engine walks the live DOM and produces a
+  versioned, JSON-serializable `CaptureResult` (structure, text, whitelisted computed styles,
+  bounding-box layout, assets, links, page metadata)
+- **Explicit security boundary** — DOM → raw inspection → sanitization/redaction → normalized
+  result. Form values, passwords, `on*` handlers, cookies, storage and tokens **never** enter
+  the result (mandatory regression-tested)
+- **Typed message flow** — Popup → Background → Content engine → Background validation →
+  Popup, with request IDs and structured error codes (no stack traces ever reach the UI)
+- **Defensive limits** — element/text/asset/time caps return valid _partial_ results with
+  warnings and statistics instead of crashing
+- **Page-change protection** — identity is checked before _and_ after capture; navigation
+  during analysis surfaces a clear retryable error
+- **Premium dark popup UI** — same design system as Phase 1, now with analysis states
+  (`detected → analyzing → ready | error`), a real statistics grid, an honest
+  "Analyzed with limitations" partial state, and human-readable errors with retry
+- **Local-first & least-privilege** — the only permission is `tabs`; the content script is
+  declared with narrow `http/https` matches only. Nothing leaves your machine
+- **Production toolchain** — TypeScript (strict), React 19, Vite 8, ESLint, Prettier,
+  Vitest, CI
+
+### What Phase 2 does _not_ do
+
+It does **not** export a clone. No HTML/CSS reconstruction, no asset downloading, no ZIP, no
+crawling, no backend/auth cloning. The capture engine is the analysis foundation those later
+phases build on.
 
 ## Technology stack
 
@@ -30,7 +51,7 @@ export a complete, standalone frontend project (`index.html` + assets) as a ZIP.
 | Manifest   | Chrome Manifest V3                           |
 | Language   | TypeScript (strict)                          |
 | UI         | React 19                                     |
-| Build      | Vite 8 (multi-entry: popup + service worker) |
+| Build      | Vite 8 (popup + service worker + content js) |
 | Lint/Style | ESLint 9 (flat config) + Prettier            |
 | Tests      | Vitest + Testing Library (jsdom)             |
 | CI         | GitHub Actions                               |
@@ -41,7 +62,7 @@ Requires **Node.js ≥ 20**.
 
 ```bash
 npm install
-npm run dev        # popup dev server with a mock active tab (HMR)
+npm run dev        # popup dev server with HMR (runs the REAL engine on the preview page)
 npm run build      # production build → dist/ (validated automatically)
 npm test           # unit tests
 npm run typecheck  # tsc --noEmit
@@ -55,20 +76,21 @@ npm run format     # prettier --write
 2. Open `chrome://extensions`
 3. Enable **Developer mode**
 4. Click **Load unpacked** and select the `dist/` folder
-5. Open any regular website and click the PageClone toolbar icon
+5. Open any regular `http(s)` website and click the PageClone toolbar icon
+6. Press **Analyze Page** — statistics come from a real capture of that page
 
 ## Scripts
 
-| Script                    | Purpose                                              |
-| ------------------------- | ---------------------------------------------------- |
-| `npm run dev`             | Popup dev server (HMR, mock tab outside the browser) |
-| `npm run watch`           | Rebuild `dist/` on change                            |
-| `npm run build`           | Production build + manifest copy + dist validation   |
-| `npm run typecheck`       | Strict TypeScript check                              |
-| `npm run lint`            | ESLint (zero warnings allowed)                       |
-| `npm run format`          | Prettier write                                       |
-| `npm test` / `test:watch` | Run / watch unit tests                               |
-| `npm run icons`           | Regenerate extension PNG icons (no image deps)       |
+| Script                    | Purpose                                            |
+| ------------------------- | -------------------------------------------------- |
+| `npm run dev`             | Popup dev server (HMR; real engine, mock tab)      |
+| `npm run watch`           | Rebuild `dist/` on change                          |
+| `npm run build`           | Production build + manifest copy + dist validation |
+| `npm run typecheck`       | Strict TypeScript check                            |
+| `npm run lint`            | ESLint (zero warnings allowed)                     |
+| `npm run format`          | Prettier write                                     |
+| `npm test` / `test:watch` | Run / watch unit tests                             |
+| `npm run icons`           | Regenerate extension PNG icons (no image deps)     |
 
 ## Project architecture
 
@@ -77,53 +99,81 @@ PageClone/
 ├── extension/
 │   ├── popup.html                 # popup HTML entry (Vite input)
 │   └── src/
-│       ├── background/            # MV3 service worker (future capture/export pipeline)
-│       ├── content/               # content-script skeleton (not injected in Phase 1)
+│       ├── background/
+│       │   ├── index.ts           # capture message listener (DI-wired)
+│       │   └── captureService.ts  # page-identity, timeout, result validation
+│       ├── content/
+│       │   ├── index.ts           # capture endpoint (typed request → response)
+│       │   └── engine/
+│       │       ├── capture.ts     # DOM walk orchestrator → CaptureResult
+│       │       ├── styles.ts      # whitelisted computed-style reading
+│       │       └── assets.ts      # image/background/SVG discovery (refs only)
 │       ├── popup/
-│       │   ├── components/        # presentational UI components
-│       │   ├── hooks/             # useActivePage (detection binding)
-│       │   ├── types/             # UI-level view models (ViewState, tones)
-│       │   ├── utils/             # view-state mapping + helpers
+│       │   ├── components/        # UI + AnalysisSummary (stats grid)
+│       │   ├── hooks/             # useActivePage, useCaptureAnalysis
+│       │   ├── utils/             # view-state mapping + captureClient
 │       │   ├── styles/            # design tokens + base + popup CSS
 │       │   ├── App.tsx            # popup composition root
-│       │   └── main.tsx           # React bootstrap
+│       │   └── main.tsx           # React bootstrap (composes both hooks)
 │       ├── shared/
-│       │   ├── types/             # PageTarget, PageMetadata, CaptureRequest/Result,
-│       │   │                      # ExportJob/Result, AnalysisPhase/Status …
-│       │   ├── constants/         # restricted protocols, message channels
-│       │   ├── chrome/            # tab detection (pure classify + Chrome binding)
-│       │   └── utils/             # URL/favicon safety helpers
+│       │   ├── types/             # PageDetection, CaptureResult model, phases
+│       │   ├── constants/         # whitelists, limits, channels
+│       │   ├── messaging/         # typed protocol + clamps + error copy
+│       │   ├── security/          # redaction/sanitization boundary
+│       │   ├── validation/        # CaptureResult validation (background)
+│       │   ├── chrome/            # tab detection (pure classify + binding)
+│       │   └── utils/             # URL/favicon/page-identity safety helpers
 │       └── manifest/
 │           └── chrome.json        # source of truth for dist/manifest.json
 ├── scripts/                       # copy-manifest, verify-dist, generate-icons
-├── tests/                         # Vitest suites (mirrored by feature)
+├── tests/                         # 21 Vitest suites (233 tests)
 ├── docs/                          # architecture notes
 └── .github/workflows/ci.yml       # typecheck → lint → format → test → build
 ```
 
-### Boundaries that keep future phases simple
+### Analysis pipeline
 
-- **UI never talks to the analysis engine.** The popup renders an `AnalysisPhase`
-  (`idle → detecting → detected → analyzing → ready | error`); a later phase drives that state
-  without touching component internals.
-- **Detection is pure at the core.** `classifyTab()` is a pure function; only
-  `detectActivePage()` binds to `chrome.tabs` — both are unit-tested.
-- **Engine contracts are already typed.** `CaptureRequest`, `CaptureResult`, `ExportJob` and
-  `ExportResult` exist in `shared/types` so the ZIP pipeline can land behind stable interfaces.
-- **Permissions grow deliberately.** `verify-dist.mjs` fails the build if Phase 1's manifest
-  ever requests more than `tabs`, or gains host permissions / content scripts prematurely.
+```
+Popup (useCaptureAnalysis)
+  → chrome.runtime.sendMessage  { channel: 'pageclone:capture', requestId, tabId, targetUrl, options }
+    → Background (captureService): validate request · tab/page identity · timeout ≤ 8 s
+      → Content (engine): DOM → raw inspection → sanitization → normalized CaptureResult
+      ← CaptureResult | structured failure code
+    ← schema/version/limit validation · page identity re-check
+  ← CaptureOutcome { ok, result | code, message }
+Popup: idle → analyzing → ready (stats grid) | error (canonical copy + retry)
+```
+
+### Boundaries that keep later phases simple
+
+- **UI never talks to the engine directly.** The popup renders an `AnalysisPhase`
+  (`idle → detecting → detected → analyzing → ready | error`); `useCaptureAnalysis` owns
+  the transitions, components stay presentational.
+- **Content is untrusted.** The background validates every response (schema, version,
+  limits, serialization) before it reaches the popup; failure copy is canonical, never
+  attacker- or stack-derived.
+- **Detection stays pure.** `classifyTab()` remains a pure function; `PageMetadata` carries
+  the `tabId` needed to address the tab.
+- **Permissions are enforced at build time.** `verify-dist.mjs` fails the build if the
+  manifest requests anything beyond `tabs`, or if `content_scripts` deviates from the exact
+  narrow contract.
 
 ## Permissions & privacy
 
-| Permission | Why Phase 1 needs it                                     |
-| ---------- | -------------------------------------------------------- |
-| `tabs`     | Read the active tab's URL, title and favicon for display |
+| Permission / declaration  | Why Phase 2 needs it                                    |
+| ------------------------- | ------------------------------------------------------- |
+| `tabs`                    | Read active-tab URL/title/favicon; address the tab      |
+| `content_scripts` matches | `http://*/*` + `https://*/*` only, store pages excluded |
 
-- **No host permissions, no content scripts** are requested yet — PageClone injects nothing
-  into any page during Phase 1.
-- No data is transmitted anywhere. No cookies, credentials or tokens are ever read.
-- Browser-protected pages (`chrome://`, `about:`, the Web Store, …) are refused with a clear
-  message — PageClone does not bypass browser security.
+- **No host permissions** — injection is declared solely through the narrow content-script
+  matches; nothing runs on `chrome://`, `file:`, `about:`, or store pages.
+- The content script is a **read-only analyzer**: it never modifies the page, never follows
+  links, and never reads cookies, `localStorage`, `sessionStorage`, IndexedDB, form values,
+  passwords or tokens. Attribute capture is allow-list based (`value`, `style`, `on*` are
+  excluded); inline SVG is sanitized (no scripts, no external references).
+- No data is transmitted anywhere — everything is processed locally between extension
+  contexts. Browser-protected pages are refused with a clear message; PageClone does not
+  bypass browser security.
 
 ## Testing
 
@@ -131,23 +181,25 @@ PageClone/
 npm test
 ```
 
-Coverage includes: manifest rules, dist build validation (inside `npm run build`), tab
-detection (supported / restricted / missing / API failure), every popup UI state,
-accessibility expectations (landmarks, labels, live region), favicon safety, and shared
-utilities.
+21 suites / 233 tests cover: manifest rules, tab detection, every popup UI state,
+accessibility, protocol guards and clamping, result validation, the background service
+(failure paths, timeouts, page-change protection), the capture client and hook state
+machine, DOM/style/layout/asset/link/interactive capture, performance limits and partial
+results — plus a mandatory **security regression suite** proving password and form values
+never appear in `CaptureResult` JSON.
 
 ## Roadmap
 
-| Phase | Scope                                                            |
-| ----- | ---------------------------------------------------------------- |
-| **1** | ✅ Foundation: MV3 shell, tab detection, premium popup UI, CI    |
-| **2** | Page analysis engine (DOM inspection, asset discovery)           |
-| **3** | Reconstruction into a standalone project (`index.html` + assets) |
-| **4** | ZIP export of the cloned frontend project                        |
-| **5** | Polish: settings, export history, optional light theme           |
+| Phase | Scope                                                                  |
+| ----- | ---------------------------------------------------------------------- |
+| **1** | ✅ Foundation: MV3 shell, tab detection, premium popup UI, CI          |
+| **2** | ✅ Real capture & analysis engine: DOM/styles/assets, security, limits |
+| **3** | Reconstruction into a standalone project (`index.html` + assets)       |
+| **4** | ZIP export of the cloned frontend project                              |
+| **5** | Polish: settings, export history, optional light theme                 |
 
-Deep webpage reconstruction is **planned, not yet available**. PageClone will never claim a
-page was cloned until the engine actually did it.
+Reconstruction is **planned, not yet available**. PageClone will never claim a page was
+cloned until the engine actually did it — the UI says _analyzed_ until then.
 
 ## License
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AnalysisPhase, PageDetection } from '@/shared/types';
+import type { AnalysisPhase, CaptureResult, PageDetection } from '@/shared/types';
+import { AnalysisSummary } from './components/AnalysisSummary';
 import { Header } from './components/Header';
 import { IconRefresh } from './components/Icons';
 import { PageCard } from './components/PageCard';
@@ -7,17 +8,32 @@ import { PrimaryAction } from './components/PrimaryAction';
 import { StatusNote } from './components/StatusNote';
 import { ANALYSIS_UNAVAILABLE_NOTICE, getStatusNote, toViewState } from './utils/viewState';
 
+export interface AppErrorInfo {
+  readonly message: string;
+}
+
 export interface AppProps {
   /** Detection result — null while the first request is in flight. */
   readonly detection: PageDetection | null;
-  /** Driven by the future analysis engine; defaults to Phase 1's `idle`. */
+  /** Driven by the capture engine (`useCaptureAnalysis`). */
   readonly analysisPhase?: AnalysisPhase;
+  /** Successful capture statistics shown in the ready state. */
+  readonly captureResult?: CaptureResult | null;
+  /** Canonical failure copy shown in the error state. */
+  readonly captureError?: AppErrorInfo | null;
   readonly onRefresh: () => void;
-  /** Reserved for the Phase 2 engine; when omitted the button says so. */
+  /** Starts a capture; when omitted the button explains it is unavailable. */
   readonly onAnalyze?: () => void;
 }
 
-export function App({ detection, analysisPhase = 'idle', onRefresh, onAnalyze }: AppProps) {
+export function App({
+  detection,
+  analysisPhase = 'idle',
+  captureResult = null,
+  captureError = null,
+  onRefresh,
+  onAnalyze,
+}: AppProps) {
   const view = toViewState(detection);
   const [notice, setNotice] = useState<string | null>(null);
   const viewKind = view.kind;
@@ -35,7 +51,14 @@ export function App({ detection, analysisPhase = 'idle', onRefresh, onAnalyze }:
     setNotice(ANALYSIS_UNAVAILABLE_NOTICE);
   }, [onAnalyze]);
 
-  const note = getStatusNote({ view, phase: analysisPhase, notice });
+  const note = getStatusNote({
+    view,
+    phase: analysisPhase,
+    notice,
+    errorMessage: captureError?.message ?? null,
+  });
+
+  const showSummary = analysisPhase === 'ready' && captureResult !== null;
 
   return (
     <div className="app-shell">
@@ -50,6 +73,8 @@ export function App({ detection, analysisPhase = 'idle', onRefresh, onAnalyze }:
           </h2>
           <PageCard view={view} phase={analysisPhase} />
         </section>
+
+        {showSummary && <AnalysisSummary result={captureResult} />}
 
         <PrimaryAction view={view} phase={analysisPhase} onAnalyze={handleAnalyze} />
         <StatusNote text={note} />

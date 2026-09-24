@@ -1,7 +1,7 @@
 import type { AnalysisPhase, PageDetection, PageIssue } from '@/shared/types';
 import type { StatusTone, ViewState } from '../types';
 
-/** Shown after the user presses "Analyze Page" before an engine exists. */
+/** Shown when Analyze is pressed but no analysis handler is wired (tests/dev). */
 export const ANALYSIS_UNAVAILABLE_NOTICE =
   'Page analysis is not available yet. It arrives in a later phase.';
 
@@ -65,23 +65,29 @@ export function getCardStatus(
     case 'error':
       return { tone: 'danger', label: 'Analysis failed' };
     default:
-      return { tone: 'ok', label: 'Current page detected' };
+      return { tone: 'ok', label: 'Ready to analyze' };
   }
 }
 
 /**
  * Footer note beneath the primary action. Priority: active analysis phase →
- * transient notice → view-based default.
+ * transient notice → view-based default. `errorMessage` is canonical copy
+ * produced by the capture pipeline — never an internal exception.
  */
 export function getStatusNote(input: {
   readonly view: ViewState;
   readonly phase: AnalysisPhase;
   readonly notice: string | null;
+  readonly errorMessage?: string | null;
 }): string | null {
-  const { view, phase, notice } = input;
-  if (phase === 'analyzing') return 'Analyzing page structure…';
-  if (phase === 'ready') return 'Analysis complete. Reconstruction runs in a later release.';
-  if (phase === 'error') return 'Something went wrong while analyzing this page.';
+  const { view, phase, notice, errorMessage } = input;
+  if (phase === 'analyzing') return 'Analyzing page…';
+  if (phase === 'ready') return 'Ready for reconstruction.';
+  if (phase === 'error') {
+    return errorMessage != null && errorMessage !== ''
+      ? errorMessage
+      : 'Something went wrong while analyzing this page.';
+  }
   if (notice !== null) return notice;
   if (view.kind === 'detected') return 'Ready to create a standalone frontend from this page.';
   return null;

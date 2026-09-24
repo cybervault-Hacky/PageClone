@@ -17,9 +17,11 @@ export function classifyTab(tab: DetectedTab): PageDetection {
 
   const hostname = getHostname(url);
   if (hostname === null) return { status: 'error', issue: 'inaccessible' };
+  if (typeof tab.id !== 'number') return { status: 'error', issue: 'inaccessible' };
 
   const title = typeof tab.title === 'string' ? tab.title.trim() : '';
   const page: PageMetadata = {
+    tabId: tab.id,
     url,
     hostname,
     title: title === '' ? null : title,

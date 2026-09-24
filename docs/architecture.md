@@ -1,98 +1,138 @@
-# PageClone — Architecture Notes (Phase 1)
+# PageClone — Architecture Notes (Phase 2)
 
-This document records the structural decisions Phase 1 establishes so later phases can grow
-the cloning engine without rewriting the extension.
+This document records the structural decisions Phases 1–2 establish so reconstruction
+(Phase 3+) can grow behind stable interfaces without rewriting the extension.
 
 ## Module map
 
 ```
-┌─────────────┐     props      ┌──────────────────────────┐
-│ popup/main  │ ─────────────▶ │ popup/App (composition)  │
-│  + hook     │                │  components · utils      │
-└──────┬──────┘                └────────────┬─────────────┘
-       │ uses                              │ reads types only
-       ▼                                   ▼
-┌──────────────────────────┐     ┌──────────────────────────┐
-│ shared/chrome (tabs)     │     │ shared/types             │
-│  detectActivePage()      │     │  PageDetection,          │
-│  classifyTab() (pure)    │     │  AnalysisPhase,          │
-└──────────────────────────┘     │  Capture*, Export*       │
-                                 └──────────────────────────┘
-┌─────────────┐   (Phase 2+)    ┌──────────────────────────┐
-│ background  │ ◀────────────── │ future analysis/export   │
-│  worker     │   messages      │ engine (not built yet)   │
-└─────────────┘                 └──────────────────────────┘
-┌─────────────┐   (Phase 2+)    ┌──────────────────────────┐
-│ content     │ ◀────────────── │ DOM inspection           │
-│  skeleton   │   not injected  │ (not active yet)         │
-└─────────────┘                 └──────────────────────────┘
+┌──────────────────────┐  capture request   ┌─────────────────────────────┐
+│ popup                │ ─────────────────▶ │ background                  │
+│  useCaptureAnalysis  │                    │  captureService             │
+│  captureClient       │ ◀───────────────── │   · request guard           │
+│  App · components    │  CaptureResult or  │   · tab/page identity (2×)  │
+│  AnalysisSummary     │  structured error  │   · timeout (8 s)           │
+└──────────────────────┘                    │   · result validation       │
+                                            └──────────────┬──────────────┘
+                                                           │ capture request
+                                            ┌──────────────▼──────────────┐
+                                            │ content (http/https only)   │
+                                            │  index.ts endpoint          │
+                                            │  engine/capture.ts          │
+                                            │   engine/styles.ts          │
+                                            │   engine/assets.ts          │
+                                            │  shared/security/redact     │
+                                            └─────────────────────────────┘
+
+shared/  types · constants (whitelists/limits) · messaging (protocol)
+         validation (CaptureResult schema) · chrome (detection) · utils (URL safety)
 ```
 
 ## Key decisions
 
-### 1. Detection runs in the popup, not the background
+### 1. Detection runs in the popup, analysis runs in the page
 
-`chrome.tabs.query` works directly from the popup. This keeps Phase 1 latency at zero (no
-message round-trip) and keeps the service worker idle until a real pipeline needs it. The
-worker already exists so Phase 2 adds listeners instead of new plumbing.
+`chrome.tabs.query` still powers detection straight from the popup (zero-latency first
+paint). Analysis itself must observe the live DOM, so Phase 2 injects a single
+content script via **narrow `content_scripts` matches** (`http://*/*`, `https://*/*`,
+store pages excluded, `document_idle`, `all_frames: false`). No `host_permissions`, no
+programmatic `chrome.scripting` — registration is declarative and reviewable in the
+manifest. The message flow is Popup → Background → Content → engine → Background
+validation → Popup, so exactly one party (background) is trusted to validate.
 
-### 2. Pure core, thin Chrome binding
+### 2. The security boundary is a pipeline, not a convention
 
-`classifyTab(tab)` implements all classification rules (restricted schemes, hostname
-extraction, favicon safety) as a pure function. `detectActivePage()` only fetches the tab and
-delegates. Tests cover both layers without mocking deeply.
+Raw DOM inspection output never becomes part of a result directly. Every node passes:
 
-### 3. One state machine, rendered by the UI
+1. **Attribute allow-list** (`shared/constants/capture.ts`): `value`, `style`, `on*`,
+   `data-*`, and unknown names are dropped (dropped attributes are counted);
+   URL-ish attributes are scheme-checked (`http(s)/data:image` only) and made absolute.
+2. **Text normalization**: whitespace collapsed, bounded per node and in total; form
+   control tags (`textarea`, `option`… handled by tag policy) never emit text or values.
+3. **SVG sanitization**: parsed via `DOMParser`, `script`/`foreignObject`/`iframe`…
+   removed, `on*` attributes stripped, unsafe URLs cleared, re-serialized.
+4. **Declared invariants**: `security.cookiesAccessed` / `storageAccessed` are literally
+   `false`; unit tests install spies over `document.cookie`, `Storage`, `indexedDB` and
+   assert **zero reads** during capture.
+
+Mandatory regression tests (`tests/captureSecurity.test.ts`) prove
+`<input type="password" value="SECRET">` and every form value are absent from the
+serialized `CaptureResult` JSON.
+
+### 3. Content is untrusted; background is the validator
+
+`captureService.handleCaptureRequest` is dependency-injected (`getTab`, `sendToTab`,
+`timeoutMs`) and treats the content script as hostile input:
+
+- request guard + clamped `CaptureOptions` (`clampCaptureOptions`);
+- pre-dispatch: tab exists, not restricted, `pageIdentity(tab.url)` matches;
+- dispatch under an 8 s timeout (> engine's 6 s duration limit) → `CAPTURE_TIMEOUT`;
+- response envelope must echo the `requestId`, code must be a known `CaptureErrorCode`;
+- `validateCaptureResult` checks schema/version/limits/field shapes/parent-child
+  integrity/JSON size → `CAPTURE_INVALID_RESULT | CAPTURE_LIMIT_REACHED |
+CAPTURE_SERIALIZATION_FAILED`;
+- post-dispatch: page identity checked **again** (SPA navigation during capture →
+  `CAPTURE_PAGE_CHANGED`).
+
+Failures become canonical human copy from `CAPTURE_ERROR_MESSAGES` — stack traces and
+internal messages never leave the background.
+
+### 4. CaptureResult is a normalized tree, not HTML
+
+The engine emits `{ nodeId, parentId, childNodeIds, tagName, attributes, text?, styles?,
+layout?, pseudo?, semantic, svg? }` nodes with sequential stable IDs, plus `assets`
+(references only — images/backgrounds/SVG markup, never downloaded bytes), `links`
+(absolute, never crawled), `statistics`, `warnings`, and `security`. It is
+`version: 1`, pure JSON, and is what Phase 3 reconstructs — `documentElement.outerHTML`
+is explicitly _not_ the capture format.
+
+### 5. Defensive limits produce partial results, never crashes
+
+`CAPTURE_LIMITS` (5 000 elements, 400 chars/node, 200 000 total chars, 500 assets,
+depth 300, 6 000 ms, 5 MB serialized) are enforced _during_ the walk; hitting any cap
+emits a typed warning (`element-limit`, `text-limit`, `asset-limit`, `duration-limit`,
+`depth-limit`), sets `statistics.truncated`, and returns the best-effort tree. The
+popup renders the "Analyzed with limitations" state for partial captures.
+
+### 6. One state machine, honest copy
 
 `AnalysisPhase` (`idle | detecting | detected | analyzing | ready | error`) plus
-`ViewState` (`detecting | detected | unsupported | error`) cover every popup screen.
-The popup receives states as props; it never decides _what_ the browser state is and never
-contains analysis logic.
+`ViewState` cover every popup screen. Copy contract (Phase 2): detection says
+"Ready to analyze"; analysis says "Analyzing page…" → "Ready for reconstruction.";
+errors show canonical engine copy with **"Try again"** / success offers **"Analyze
+again"**. **"Detected" ≠ "analyzed" ≠ "cloned"** — the statistics grid only appears with
+a validated real result.
 
-Crucially, **“page detected” ≠ “page analyzed”**: detection shows `Current page detected`,
-analysis states (`analyzing`/`ready`) are a separate axis shown only when a future engine
-drives `analysisPhase`.
+### 7. Manifest as a validated source file
 
-### 4. Manifest as a validated source file
+`extension/src/manifest/chrome.json` remains the editable source. `scripts/verify-dist.mjs`
+validates the built extension: required files (now including `content.js`), MV3,
+permissions **exactly** `["tabs"]`, and the exact content-script contract (matches,
+excludes, `document_idle`, `all_frames: false`). Broader permissions or match patterns
+fail the build — same for the source-manifest unit tests.
 
-`extension/src/manifest/chrome.json` is the editable source. The build copies it to
-`dist/manifest.json`, then `scripts/verify-dist.mjs` validates the built extension:
+### 8. Least privilege, by construction
 
-- required files exist (popup, worker, icons, hashed assets)
-- `manifest_version === 3`
-- permissions stay exactly `["tabs"]`
-- no `host_permissions` / `content_scripts` until a later phase adds them on purpose
+| Capability                       | Phase 1 | Phase 2                      |
+| -------------------------------- | ------- | ---------------------------- |
+| Read active tab URL/title        | ✅ tabs | ✅ tabs                      |
+| Inject content script            | ❌      | ✅ narrow http/https matches |
+| Read page DOM (read-only)        | ❌      | ✅ allow-listed inspection   |
+| Read cookies/storage/form values | ❌      | ❌ (tested invariant)        |
+| Host permissions                 | ❌      | ❌                           |
+| Cross-origin asset downloads     | ❌      | ❌ (references only)         |
 
-Unit tests additionally validate the source manifest, so a permission regression fails CI
-even before the build step.
+## File ownership guide
 
-### 5. Least privilege, by construction
-
-| Capability                        | Phase 1   | Later phase              |
-| --------------------------------- | --------- | ------------------------ |
-| Read active tab URL/title/favicon | ✅ `tabs` | —                        |
-| Inject content script             | ❌        | Phase 2 (narrow matches) |
-| Read page DOM                     | ❌        | Phase 2                  |
-| Access cross-origin assets        | ❌        | Phase 3+                 |
-| Host permissions                  | ❌        | Phase 3+                 |
-
-Restricted pages (`chrome://`, `about:`, `file://`, store front-ends, devtools, websockets)
-are classified as unsupported and shown with friendly copy. No bypass paths exist in code.
-
-### 6. Future engine contracts are typed, not implemented
-
-`shared/types` declares `PageTarget`, `PageMetadata`, `CaptureRequest`, `CaptureResult`,
-`ExportJob`, `ExportResult`, and `AnalysisStatus`. These are interfaces only — Phase 2+
-implements them behind the same names, so UI code written today keeps compiling.
-
-## File ownership guide (for future phases)
-
-| Change                               | Where                                                                 |
-| ------------------------------------ | --------------------------------------------------------------------- |
-| New popup screen / component         | `popup/components`, composed in `App.tsx`                             |
-| New detection or classification rule | `shared/chrome` (+ tests)                                             |
-| New restricted scheme                | `shared/constants` → `RESTRICTED_PROTOCOLS`                           |
-| Analysis pipeline / messaging        | `background/`, driven via `AnalysisPhase`                             |
-| DOM inspection                       | `content/` + manifest `content_scripts`                               |
-| Export/architecture details          | `docs/`                                                               |
-| New permission                       | `manifest/chrome.json` + `verify-dist.mjs` allowed set + README table |
+| Change                        | Where                                                       |
+| ----------------------------- | ----------------------------------------------------------- |
+| New popup screen / component  | `popup/components`, composed in `App.tsx`                   |
+| New detection rule            | `shared/chrome` (+ tests)                                   |
+| New restricted scheme         | `shared/constants` → `RESTRICTED_PROTOCOLS`                 |
+| New style/attribute captured  | `shared/constants/capture.ts` whitelists (+ security tests) |
+| Capture walk behaviour        | `content/engine/*`                                          |
+| Validation / failure policy   | `shared/validation`, `background/captureService`            |
+| Protocol / error copy         | `shared/messaging/protocol.ts`                              |
+| Export/ZIP pipeline (Phase 4) | `background/` (extend `captureService`)                     |
+| Reconstruction (Phase 3)      | new `shared/reconstruct` + popup export flow                |
+| New permission                | `manifest/chrome.json` + `verify-dist.mjs` + README table   |

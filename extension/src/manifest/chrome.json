@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PageClone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Capture the frontend of the current page and rebuild it as a standalone local project.",
   "permissions": ["tabs"],
   "background": {
@@ -22,6 +22,18 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "https://chromewebstore.google.com/*",
+        "https://chrome.google.com/webstore/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }

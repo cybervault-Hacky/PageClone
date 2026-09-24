@@ -8,6 +8,7 @@ describe('classifyTab', () => {
     expect(result).toEqual({
       status: 'supported',
       page: {
+        tabId: 12,
         url: 'https://www.example.com/pricing',
         hostname: 'www.example.com',
         title: 'Example — Pricing',
@@ -26,6 +27,7 @@ describe('classifyTab', () => {
 
   it('drops unsafe favicon URLs', () => {
     const result = classifyTab({
+      id: 7,
       url: 'https://example.com/',
       favIconUrl: 'javascript:alert(1)',
     });

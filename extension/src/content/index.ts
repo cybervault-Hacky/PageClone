@@ -1,29 +1,56 @@
 /**
- * Content script entry point (Phase 1 skeleton).
+ * Content script entry point (Phase 2 — active on http/https pages only).
  *
- * Not registered in manifest.json yet: Phase 1 holds no host permissions and
- * injects nothing into pages. A later phase will activate this module for
- * DOM inspection behind explicit, narrow matches.
+ * Owns page inspection. Responds to typed capture requests from the
+ * background service worker with a sanitized CaptureResult or a structured
+ * failure. The script never modifies the page, never navigates, and never
+ * reads cookies, storage or form values.
  */
-import { MESSAGE_CHANNELS } from '@/shared/constants';
+import {
+  clampCaptureOptions,
+  createCaptureFailure,
+  createCaptureSuccess,
+  isCaptureChannelMessage,
+  isCaptureRequestMessage,
+} from '@/shared/messaging/protocol';
+import type { CaptureResponseMessage } from '@/shared/messaging/protocol';
+import { pageIdentity } from '@/shared/utils/url';
+import { captureDocument } from './engine/capture';
 
-export interface AnalysisRequest {
-  readonly type: typeof MESSAGE_CHANNELS.analysis;
-}
+/** Handles one capture request; always returns a typed response envelope. */
+export async function handleCaptureRequest(
+  message: unknown,
+): Promise<CaptureResponseMessage | null> {
+  if (!isCaptureChannelMessage(message)) return null;
 
-export function isAnalysisRequest(value: unknown): value is AnalysisRequest {
-  if (typeof value !== 'object' || value === null) return false;
-  return (value as { type?: unknown }).type === MESSAGE_CHANNELS.analysis;
+  if (!isCaptureRequestMessage(message)) {
+    return createCaptureFailure('invalid', 'CAPTURE_INVALID_REQUEST');
+  }
+
+  const { requestId, targetUrl, options } = message;
+
+  // Page-change protection: refuse to capture a document that no longer
+  // matches the page the popup asked for (hash-only changes are fine).
+  if (pageIdentity(location.href) !== pageIdentity(targetUrl)) {
+    return createCaptureFailure(requestId, 'CAPTURE_PAGE_CHANGED');
+  }
+
+  try {
+    const result = captureDocument(clampCaptureOptions(options), location.href);
+    return createCaptureSuccess(requestId, result);
+  } catch {
+    // Internal engine failure — no details leave the content script.
+    return createCaptureFailure(requestId, 'CAPTURE_FAILED');
+  }
 }
 
 function registerListener(): void {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (isAnalysisRequest(message)) {
-      // Phase 1 has no analysis engine — respond honestly instead of faking it.
-      sendResponse({ ok: false, reason: 'analysis-unavailable' });
-      return true;
-    }
-    return false;
+    if (!isCaptureChannelMessage(message)) return false;
+    void handleCaptureRequest(message).then((response) => {
+      if (response !== null) sendResponse(response);
+    });
+    return true;
   });
 }
 

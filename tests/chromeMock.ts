@@ -31,11 +31,16 @@ export type MockMessageListener = (
 ) => unknown;
 
 interface ChromeMock {
-  readonly tabs: { query: ReturnType<typeof vi.fn> };
+  readonly tabs: {
+    query: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    sendMessage: ReturnType<typeof vi.fn>;
+  };
   readonly runtime: {
     readonly id: string;
     readonly onInstalled: { addListener: (listener: MockInstalledListener) => void };
     readonly onMessage: { addListener: (listener: MockMessageListener) => void };
+    sendMessage: ReturnType<typeof vi.fn>;
   };
   /**
    * Plain-array listener registry. Unlike `vi.fn()` call history (which
@@ -55,6 +60,8 @@ function createChromeMock(): ChromeMock {
   return {
     tabs: {
       query: vi.fn(),
+      get: vi.fn(),
+      sendMessage: vi.fn(),
     },
     runtime: {
       id: 'pageclone-test',
@@ -68,6 +75,7 @@ function createChromeMock(): ChromeMock {
           onMessage.push(listener);
         },
       },
+      sendMessage: vi.fn(),
     },
     listeners: { onInstalled, onMessage },
   };
@@ -94,7 +102,22 @@ function getOrCreateChromeMock(): ChromeMock {
 
 export const chromeMock = getOrCreateChromeMock();
 
-export function resetTabsQuery(): void {
+/** Resets per-test API behavior to sane defaults. Called from setup.ts. */
+export function resetChromeMocks(): void {
   chromeMock.tabs.query.mockReset();
   chromeMock.tabs.query.mockResolvedValue([defaultTab()]);
+
+  chromeMock.tabs.get.mockReset();
+  chromeMock.tabs.get.mockResolvedValue(defaultTab());
+
+  chromeMock.tabs.sendMessage.mockReset();
+  chromeMock.tabs.sendMessage.mockResolvedValue(undefined);
+
+  chromeMock.runtime.sendMessage.mockReset();
+  // Default: respond with no payload → client normalizes to a structured error.
+  chromeMock.runtime.sendMessage.mockImplementation(
+    (_message: unknown, callback?: (response: unknown) => void) => {
+      callback?.(undefined);
+    },
+  );
 }

@@ -35,10 +35,14 @@ export default defineConfig({
       input: {
         popup: path.join(extensionRoot, 'popup.html'),
         background: path.join(extensionRoot, 'src/background/index.ts'),
+        content: path.join(extensionRoot, 'src/content/index.ts'),
       },
       output: {
-        entryFileNames: (chunk) =>
-          chunk.name === 'background' ? 'background.js' : 'assets/[name]-[hash].js',
+        entryFileNames: (chunk) => {
+          if (chunk.name === 'background') return 'background.js';
+          if (chunk.name === 'content') return 'content.js';
+          return 'assets/[name]-[hash].js';
+        },
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },

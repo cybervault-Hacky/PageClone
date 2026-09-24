@@ -1,11 +1,71 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '@/popup/App';
-import type { PageDetection } from '@/shared/types';
+import { CAPTURE_RESULT_VERSION } from '@/shared/constants/capture';
+import type { CaptureResult, PageDetection } from '@/shared/types';
+
+function captureFixture(): CaptureResult {
+  return {
+    version: CAPTURE_RESULT_VERSION,
+    capturedAt: 1_700_000_000_000,
+    page: {
+      url: 'https://www.example.com/pricing',
+      hostname: 'www.example.com',
+      title: 'Example — Pricing',
+      language: 'en',
+      direction: 'ltr',
+      faviconUrl: null,
+    },
+    viewport: {
+      width: 800,
+      height: 600,
+      devicePixelRatio: 1,
+      scrollWidth: 800,
+      scrollHeight: 1200,
+    },
+    nodes: [
+      {
+        nodeId: 0,
+        parentId: null,
+        childNodeIds: [],
+        tagName: 'html',
+        attributes: { lang: 'en' },
+        semantic: { interactive: false, headingLevel: null },
+        layout: { x: 0, y: 0, width: 800, height: 1200 },
+      },
+    ],
+    assets: [],
+    links: [],
+    statistics: {
+      elementsCaptured: 42,
+      elementsSkipped: 0,
+      images: 1,
+      svgs: 0,
+      styledElements: 2,
+      links: 3,
+      assetsDiscovered: 1,
+      textCharactersCaptured: 120,
+      truncated: false,
+      durationMs: 42,
+      serializedBytes: 512,
+    },
+    warnings: [],
+    security: {
+      cookiesAccessed: false,
+      storageAccessed: false,
+      passwordFieldsOmitted: 0,
+      formValuesOmitted: 0,
+      eventHandlerAttributesDropped: 0,
+      svgScriptsRemoved: 0,
+      unsafeUrlsSanitized: 0,
+    },
+  };
+}
 
 const detected: PageDetection = {
   status: 'supported',
   page: {
+    tabId: 12,
     url: 'https://www.example.com/pricing',
     hostname: 'www.example.com',
     title: 'Example — Pricing',
@@ -68,7 +128,7 @@ describe('App — UI states', () => {
 
     // www. is stripped for display.
     expect(screen.getByText('example.com')).toBeInTheDocument();
-    expect(screen.getByText('Current page detected')).toBeInTheDocument();
+    expect(screen.getByText('Ready to analyze')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Analyze Page' })).toBeEnabled();
     expect(screen.getByRole('status')).toHaveTextContent(
       'Ready to create a standalone frontend from this page.',
@@ -85,6 +145,7 @@ describe('App — UI states', () => {
       detection: {
         status: 'supported',
         page: {
+          tabId: 12,
           url: 'https://www.example.com/',
           hostname: 'www.example.com',
           title: 'Example',
@@ -139,7 +200,7 @@ describe('App — UI states', () => {
     renderApp({ detection: detected, analysisPhase: 'analyzing' });
 
     expect(screen.getByText('Analyzing page')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Analyzing page structure…');
+    expect(screen.getByRole('status')).toHaveTextContent('Analyzing page…');
     const button = screen.getByRole('button', { name: 'Analyzing…' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('aria-busy', 'true');
@@ -149,9 +210,9 @@ describe('App — UI states', () => {
     renderApp({ detection: detected, analysisPhase: 'ready' });
 
     expect(screen.getByText('Analysis complete')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(/Analysis complete\./);
+    expect(screen.getByRole('status')).toHaveTextContent('Ready for reconstruction.');
     // Detection status is still visible alongside analysis status.
-    expect(screen.queryByText('Current page detected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ready to analyze')).not.toBeInTheDocument();
   });
 
   it('shows the analysis error state', () => {
@@ -185,5 +246,59 @@ describe('App — interactions', () => {
     const { onRefresh } = renderApp({ detection: detected });
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('App — Phase 2 analysis states', () => {
+  it('does not show analysis summary before analysis completes', () => {
+    renderApp({ detection: detected });
+    expect(screen.queryByLabelText('Analysis results')).not.toBeInTheDocument();
+  });
+
+  it('shows real statistics after a successful analysis', () => {
+    renderApp({ detection: detected, analysisPhase: 'ready', captureResult: captureFixture() });
+
+    expect(screen.getByLabelText('Analysis results')).toBeInTheDocument();
+    for (const label of ['Elements', 'Images', 'SVGs', 'Links', 'Styled', 'Assets']) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText('42')).toBeInTheDocument(); // elementsCaptured
+    expect(screen.getByText('3')).toBeInTheDocument(); // links
+    expect(screen.queryByText(/Analyzed with limitations/)).not.toBeInTheDocument();
+  });
+
+  it('shows the partial-capture notice when the result was truncated', () => {
+    const partial: CaptureResult = {
+      ...captureFixture(),
+      statistics: { ...captureFixture().statistics, truncated: true },
+    };
+    renderApp({ detection: detected, analysisPhase: 'ready', captureResult: partial });
+    expect(screen.getByText(/Analyzed with limitations/)).toBeInTheDocument();
+  });
+
+  it('shows canonical engine error copy with a retry action', () => {
+    renderApp({
+      detection: detected,
+      analysisPhase: 'error',
+      captureError: { message: 'The page changed during analysis. Please try again.' },
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'The page changed during analysis. Please try again.',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    expect(screen.queryByLabelText('Analysis results')).not.toBeInTheDocument();
+  });
+
+  it('offers re-analysis after a successful run', () => {
+    renderApp({ detection: detected, analysisPhase: 'ready', captureResult: captureFixture() });
+    expect(screen.getByRole('button', { name: 'Analyze again' })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Ready for reconstruction.');
+  });
+
+  it('disables the button while analyzing', () => {
+    renderApp({ detection: detected, analysisPhase: 'analyzing' });
+    expect(screen.getByRole('button', { name: 'Analyzing…' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Analyzing page…');
+    expect(screen.getByText('Analyzing page')).toBeInTheDocument(); // card status chip
   });
 });

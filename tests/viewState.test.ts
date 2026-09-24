@@ -12,6 +12,7 @@ import {
 const supported: PageDetection = {
   status: 'supported',
   page: {
+    tabId: 4,
     url: 'https://example.com/',
     hostname: 'example.com',
     title: 'Example',
@@ -75,11 +76,11 @@ describe('getCardStatus', () => {
   it('shows detection status while idle', () => {
     expect(getCardStatus(detected, 'idle')).toEqual({
       tone: 'ok',
-      label: 'Current page detected',
+      label: 'Ready to analyze',
     });
     expect(getCardStatus(detected, 'detected')).toEqual({
       tone: 'ok',
-      label: 'Current page detected',
+      label: 'Ready to analyze',
     });
   });
 
@@ -116,19 +117,30 @@ describe('getStatusNote', () => {
 
   it('shows analysis states distinctly from plain detection', () => {
     expect(getStatusNote({ view: detected, phase: 'analyzing', notice: null })).toBe(
-      'Analyzing page structure…',
+      'Analyzing page…',
     );
-    expect(getStatusNote({ view: detected, phase: 'ready', notice: null })).toMatch(
-      /^Analysis complete/,
+    expect(getStatusNote({ view: detected, phase: 'ready', notice: null })).toBe(
+      'Ready for reconstruction.',
     );
     expect(getStatusNote({ view: detected, phase: 'error', notice: null })).toMatch(
       /Something went wrong/,
     );
   });
 
+  it('prefers canonical engine error copy in the error state', () => {
+    expect(
+      getStatusNote({
+        view: detected,
+        phase: 'error',
+        notice: null,
+        errorMessage: 'The page changed during analysis. Please try again.',
+      }),
+    ).toBe('The page changed during analysis. Please try again.');
+  });
+
   it('prioritizes an active phase over a stale notice', () => {
     expect(getStatusNote({ view: detected, phase: 'analyzing', notice: 'old notice' })).toBe(
-      'Analyzing page structure…',
+      'Analyzing page…',
     );
   });
 

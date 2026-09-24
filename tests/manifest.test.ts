@@ -39,10 +39,46 @@ describe('manifest (source of truth)', () => {
     expect(manifest.description.length).toBeLessThanOrEqual(132);
   });
 
-  it('requests the minimum Phase 1 permissions', () => {
+  it('requests exactly ["tabs"] and no host permissions (Phase 2)', () => {
     expect(manifest.permissions).toEqual(['tabs']);
     expect(manifest.host_permissions).toBeUndefined();
-    expect(manifest.content_scripts).toBeUndefined();
+    expect((manifest as unknown as Record<string, unknown>).optional_permissions).toBeUndefined();
+  });
+
+  it('registers exactly one content script on http/https only', () => {
+    const scripts = manifest.content_scripts as Array<{
+      matches: string[];
+      exclude_matches?: string[];
+      js: string[];
+      run_at: string;
+      all_frames: boolean;
+    }>;
+    expect(Array.isArray(scripts)).toBe(true);
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]?.matches).toEqual(['http://*/*', 'https://*/*']);
+    expect(scripts[0]?.js).toEqual(['content.js']);
+    expect(scripts[0]?.run_at).toBe('document_idle');
+    expect(scripts[0]?.all_frames).toBe(false);
+  });
+
+  it('excludes extension stores and never matches restricted schemes', () => {
+    const script = (
+      manifest.content_scripts as Array<{
+        matches: string[];
+        exclude_matches?: string[];
+      }>
+    )[0];
+    expect(script?.exclude_matches).toContain('https://chromewebstore.google.com/*');
+    expect(script?.exclude_matches).toContain('https://chrome.google.com/webstore/*');
+    for (const match of script?.matches ?? []) {
+      expect(match.startsWith('http://') || match.startsWith('https://')).toBe(true);
+    }
+  });
+
+  it('declares no web accessible resources', () => {
+    expect(
+      (manifest as unknown as Record<string, unknown>).web_accessible_resources,
+    ).toBeUndefined();
   });
 
   it('declares popup, service worker and icons', () => {

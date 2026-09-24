@@ -1,23 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
-import { isAnalysisRequest } from '@/content/index';
-import { EXTENSION_NAME, MESSAGE_CHANNELS } from '@/shared/constants';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { handleCaptureRequest } from '@/content/index';
+import { MESSAGE_CHANNELS } from '@/shared/constants';
+import { CAPTURE_RESULT_VERSION } from '@/shared/constants/capture';
+import { createCaptureRequestId } from './helpers/protocol';
 import { chromeMock } from './chromeMock';
+import { resetDom } from './helpers/dom';
 
-describe('content script skeleton', () => {
-  it('registers exactly one runtime message listener when loaded', () => {
-    expect(chromeMock.listeners.onMessage).toHaveLength(1);
+function request(overrides: Record<string, unknown> = {}) {
+  return {
+    channel: MESSAGE_CHANNELS.capture,
+    type: 'capture-request',
+    requestId: createCaptureRequestId(),
+    tabId: 12,
+    targetUrl: location.href,
+    ...overrides,
+  };
+}
+
+describe('content script endpoint', () => {
+  beforeEach(() => {
+    resetDom('', '<main><h1>Hello</h1></main>');
   });
 
-  it('answers analysis requests honestly (no engine in Phase 1)', () => {
-    const listener = chromeMock.listeners.onMessage[0];
-    expect(listener).toBeDefined();
-    if (!listener) return;
-
-    const sendResponse = vi.fn();
-    const handled = listener({ type: MESSAGE_CHANNELS.analysis }, { id: 'tab-1' }, sendResponse);
-
-    expect(handled).toBe(true);
-    expect(sendResponse).toHaveBeenCalledWith({ ok: false, reason: 'analysis-unavailable' });
+  it('registers exactly one runtime message listener when loaded', () => {
+    expect(chromeMock.listeners.onMessage).toHaveLength(1);
   });
 
   it('ignores messages from other channels', () => {
@@ -30,21 +36,42 @@ describe('content script skeleton', () => {
     expect(sendResponse).not.toHaveBeenCalled();
   });
 
-  it('recognizes analysis requests on the internal channel', () => {
-    expect(isAnalysisRequest({ type: MESSAGE_CHANNELS.analysis })).toBe(true);
-    expect(isAnalysisRequest({ type: 'other' })).toBe(false);
-    expect(isAnalysisRequest(null)).toBe(false);
-    expect(isAnalysisRequest('pageclone:analysis')).toBe(false);
-    expect(isAnalysisRequest(undefined)).toBe(false);
-  });
-});
+  it('answers a valid capture request with a versioned result', async () => {
+    const response = await handleCaptureRequest(request());
 
-describe('shared constants', () => {
-  it('exposes the product name', () => {
-    expect(EXTENSION_NAME).toBe('PageClone');
+    expect(response).not.toBeNull();
+    if (!response || !response.ok) throw new Error('expected ok response');
+    expect(response.result.version).toBe(CAPTURE_RESULT_VERSION);
+    expect(response.result.nodes.length).toBeGreaterThan(0);
+    expect(response.result.statistics.elementsCaptured).toBeGreaterThan(0);
+    expect(response.result.security.cookiesAccessed).toBe(false);
+    expect(response.result.security.storageAccessed).toBe(false);
   });
 
-  it('uses a namespaced internal analysis channel', () => {
-    expect(MESSAGE_CHANNELS.analysis).toMatch(/^pageclone:/);
+  it('rejects malformed requests structurally', async () => {
+    const response = await handleCaptureRequest(request({ tabId: 'nope' }));
+    expect(response?.ok).toBe(false);
+    if (!response || response.ok) return;
+    expect(response.code).toBe('CAPTURE_INVALID_REQUEST');
+    expect(response.message).toMatch(/invalid/i);
+  });
+
+  it('refuses to capture a page that does not match the request target', async () => {
+    const response = await handleCaptureRequest(request({ targetUrl: 'https://other.test/' }));
+    expect(response?.ok).toBe(false);
+    if (!response || response.ok) return;
+    expect(response.code).toBe('CAPTURE_PAGE_CHANGED');
+  });
+
+  it('returns null for non-channel messages so other listeners can run', async () => {
+    expect(await handleCaptureRequest({ hello: 'world' })).toBeNull();
+  });
+
+  it('never leaks internal error details in failure envelopes', async () => {
+    const response = await handleCaptureRequest(request({ targetUrl: 'not-a-url' }));
+    // targetUrl that fails validation → INVALID_REQUEST, no stack details
+    expect(response?.ok).toBe(false);
+    if (!response || response.ok) return;
+    expect(response.message).not.toMatch(/at \w+|Error:|\/home\//);
   });
 });

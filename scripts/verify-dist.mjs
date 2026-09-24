@@ -64,16 +64,41 @@ if (!existsSync(manifestPath)) {
       requireFile(iconPath, `icons[${size}]`);
     }
 
-    // Least-privilege guard: Phase 1 may only ask for "tabs".
+    // Least-privilege guard: Phase 2 may only ask for "tabs".
     const allowed = new Set(['tabs']);
     for (const permission of manifest.permissions ?? []) {
       if (!allowed.has(permission)) fail(`unexpected permission in manifest: ${permission}`);
     }
-    if (manifest.host_permissions?.length) {
-      fail('host_permissions must stay empty until a later phase enables them');
+    if ((manifest.permissions ?? []).length !== 1) {
+      fail('permissions must stay exactly ["tabs"]');
     }
-    if (manifest.content_scripts?.length) {
-      fail('content_scripts must stay unset until a later phase enables them');
+    if (manifest.host_permissions?.length) {
+      fail('host_permissions must stay empty (content_scripts use narrow matches)');
+    }
+
+    // Content script contract: narrow http/https matches, single registration.
+    const EXPECTED_MATCHES = ['http://*/*', 'https://*/*'];
+    const EXPECTED_EXCLUDES = [
+      'https://chromewebstore.google.com/*',
+      'https://chrome.google.com/webstore/*',
+    ];
+    const contentScripts = manifest.content_scripts;
+    if (!Array.isArray(contentScripts) || contentScripts.length !== 1) {
+      fail('exactly one content_scripts registration is required');
+    } else {
+      const script = contentScripts[0];
+      if (JSON.stringify(script.matches) !== JSON.stringify(EXPECTED_MATCHES)) {
+        fail('content_scripts.matches must stay exactly http/https');
+      }
+      if (JSON.stringify(script.exclude_matches ?? []) !== JSON.stringify(EXPECTED_EXCLUDES)) {
+        fail('content_scripts.exclude_matches must cover the extension stores');
+      }
+      if (script.run_at !== 'document_idle') fail('content_scripts.run_at must be document_idle');
+      if (script.all_frames !== false) fail('content_scripts.all_frames must be false');
+      if (JSON.stringify(script.js) !== JSON.stringify(['content.js'])) {
+        fail('content_scripts.js must be exactly ["content.js"]');
+      }
+      for (const jsFile of script.js ?? []) requireFile(jsFile, 'content_scripts.js');
     }
   }
 }

@@ -13,11 +13,14 @@ export function PrimaryAction({ view, phase, onAnalyze }: PrimaryActionProps) {
   const detecting = view.kind === 'detecting';
   const supported = view.kind === 'detected';
   const analyzing = supported && phase === 'analyzing';
+  const canRetry = supported && (phase === 'ready' || phase === 'error');
   const disabled = detecting || !supported || analyzing;
 
   let label = 'Analyze Page';
   if (detecting) label = 'Detecting page…';
   else if (analyzing) label = 'Analyzing…';
+  else if (supported && phase === 'ready') label = 'Analyze again';
+  else if (canRetry && phase === 'error') label = 'Try again';
 
   return (
     <button

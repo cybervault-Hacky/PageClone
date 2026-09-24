@@ -29,5 +29,6 @@ export const WEBSTORE_HOSTNAMES: readonly string[] = [
 
 /** Internal message channel names (background ⇄ content ⇄ popup). */
 export const MESSAGE_CHANNELS = {
-  analysis: 'pageclone:analysis',
+  /** Popup ⇄ background ⇄ content capture request/response flow (Phase 2). */
+  capture: 'pageclone:capture',
 } as const;

@@ -1,10 +1,13 @@
 /**
  * Shared domain model for PageClone.
  *
- * Phase 1 only defines the contracts the popup relies on. The capture and
- * reconstruction engine (later phases) will implement the fuller behaviour
- * behind these types without changing the popup UI.
+ * Phase 2 defines the contracts for detection, capture and the future export
+ * pipeline. The capture model itself lives in `./capture` and is re-exported
+ * here so consumers keep a single import surface.
  */
+import type { CaptureOptions, CaptureRequest } from './capture';
+
+export type * from './capture';
 
 /** Identifies a web page the user wants to clone. */
 export interface PageTarget {
@@ -17,6 +20,8 @@ export interface PageTarget {
  * Never contains cookies, DOM content, credentials or storage.
  */
 export interface PageMetadata {
+  /** Tab the page lives in — used to target capture messages. */
+  readonly tabId: number;
   readonly url: string;
   readonly hostname: string;
   readonly title: string | null;
@@ -43,14 +48,13 @@ export type PageDetection =
 /**
  * Lifecycle of the analysis pipeline.
  *
- * `idle`, `detecting`, `detected` and `unsupported` are produced by Phase 1
- * tab detection. `analyzing`, `ready` and `error` belong to the future
- * analysis engine; the popup already renders them so Phase 2 only has to
- * drive the state, not redesign the UI.
+ * `idle`, `detecting`, `detected` and `unsupported` are produced by tab
+ * detection. Phase 2 drives `analyzing → ready | error` from the real
+ * capture engine.
  */
 export type AnalysisPhase = 'idle' | 'detecting' | 'detected' | 'analyzing' | 'ready' | 'error';
 
-/** Error codes surfaced to the UI. Raw stack traces are never shown. */
+/** Error codes surfaced to the UI for detection-level failures. */
 export type PageCloneErrorCode = 'detection-failed' | 'restricted-page' | 'analysis-failed';
 
 /** Structured status consumed by the popup. */
@@ -61,30 +65,17 @@ export interface AnalysisStatus {
   readonly errorCode: PageCloneErrorCode | null;
 }
 
-// ---------------------------------------------------------------------------
-// Future engine contracts (later phases) — defined now so the UI and the
-// engine can be developed against a stable interface. Not implemented yet.
-// ---------------------------------------------------------------------------
-
-/** Request produced when the user asks to capture a page. */
-export interface CaptureRequest {
-  readonly target: PageTarget;
-  readonly includeSubresources?: boolean;
-}
-
-/** Outcome of a page capture attempt. */
-export type CaptureResult =
-  | { readonly ok: true; readonly snapshotId: string }
-  | { readonly ok: false; readonly code: PageCloneErrorCode; readonly message: string };
-
-/** A queued job that will export a captured page as a project ZIP. */
+/** A queued job that will export a captured page as a project ZIP (Phase 4). */
 export interface ExportJob {
   readonly id: string;
   readonly createdAt: number;
   readonly request: CaptureRequest;
 }
 
-/** Outcome of an export job. */
+/** Outcome of an export job (Phase 4). */
 export type ExportResult =
   | { readonly ok: true; readonly fileName: string }
   | { readonly ok: false; readonly code: PageCloneErrorCode; readonly message: string };
+
+// Re-exported for convenience so `import('./index')` also sees options.
+export type { CaptureOptions };

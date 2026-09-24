@@ -50,3 +50,61 @@ export function resolveFaviconUrl(rawUrl: string | undefined | null): string | n
   if (!isSafeFaviconUrl(rawUrl)) return null;
   return (rawUrl as string).trim();
 }
+
+/**
+ * Resolves a raw attribute URL against the document base and returns an
+ * absolute URL — but only for safe schemes (http, https, data:image/,
+ * fragment). Relative URLs resolve against `baseHref`. Unsafe schemes
+ * (javascript:, vbscript:, data:text/html, chrome:, …) return null.
+ */
+export function resolveSafeResourceUrl(rawUrl: string, baseHref: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (trimmed === '') return null;
+  if (trimmed.startsWith('#')) return trimmed;
+  if (trimmed.toLowerCase().startsWith('data:image/')) return trimmed;
+
+  const base = parseUrl(baseHref) ?? parseUrl('https://localhost/');
+  if (base === null) return null;
+
+  let resolved: URL;
+  try {
+    resolved = new URL(trimmed, base);
+  } catch {
+    return null;
+  }
+
+  if (resolved.protocol === 'http:' || resolved.protocol === 'https:') {
+    return resolved.href;
+  }
+  if (resolved.protocol === 'mailto:' || resolved.protocol === 'tel:') {
+    return resolved.href;
+  }
+  return null;
+}
+
+/** Extracts the first URL from a CSS `background-image`-style value. */
+export function extractCssUrl(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const match = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"']*))\s*\)/i.exec(value);
+  if (!match) return null;
+  const raw = match[1] ?? match[2] ?? match[3] ?? '';
+  return raw.trim() === '' ? null : raw.trim();
+}
+
+/** Extracts the first candidate URL from a `srcset` attribute. */
+export function extractFirstSrcsetUrl(srcset: string): string | null {
+  const first = srcset.split(',')[0];
+  if (first === undefined) return null;
+  const url = first.trim().split(/\s+/)[0];
+  return url === undefined || url === '' ? null : url;
+}
+
+/**
+ * Page identity used for page-change protection: same document when
+ * origin + path + query match (hash changes are same-document).
+ */
+export function pageIdentity(rawUrl: string): string | null {
+  const url = parseUrl(rawUrl);
+  if (!url) return null;
+  return `${url.origin}${url.pathname}${url.search}`;
+}

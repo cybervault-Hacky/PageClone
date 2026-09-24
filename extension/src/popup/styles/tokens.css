@@ -1,0 +1,64 @@
+/* PageClone design tokens — the single source of truth for the UI. */
+
+:root {
+  color-scheme: dark;
+
+  /* Typography */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 15px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Surfaces */
+  --bg: #0b0c0e;
+  --surface-1: #121417;
+  --surface-2: #171a1e;
+  --surface-3: #1d2126;
+  --border: #23272d;
+  --border-strong: #2e343c;
+
+  /* Text */
+  --text-primary: #f2f4f7;
+  --text-secondary: #9ba3ad;
+  --text-muted: #858d97;
+
+  /* Accent (restrained blue) */
+  --accent: #4d8dfb;
+  --accent-solid: #2563eb;
+  --accent-solid-hover: #1d56d4;
+  --accent-solid-active: #1746b5;
+
+  /* Semantic */
+  --success: #3fc37f;
+  --danger: #ff7a7a;
+
+  /* Effects */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 35%);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
+  --focus-ring: 2px solid var(--accent);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur-normal: 180ms;
+}

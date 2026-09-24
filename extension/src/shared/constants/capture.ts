@@ -152,12 +152,28 @@ export const INTERACTIVE_TAGS: readonly string[] = [
   'label',
 ];
 
-/** Explicit computed-style subset captured for ::before / ::after. */
+/**
+ * Explicit computed-style subset captured for ::before / ::after.
+ * Phase 3 extends this set (and PseudoElementStyle) with the properties the
+ * reconstruction can safely emit — additive only; older captures stay valid.
+ */
 export const PSEUDO_STYLE_WHITELIST: readonly string[] = [
+  'content',
+  'display',
+  'position',
+  'top',
+  'left',
+  'width',
+  'height',
   'color',
   'background-color',
   'background-image',
-  'content',
+  'font-size',
+  'font-weight',
+  'line-height',
+  'border',
+  'border-radius',
+  'transform',
 ];
 
 /** Defensive hard limits for a single capture run. */

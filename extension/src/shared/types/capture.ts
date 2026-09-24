@@ -66,12 +66,33 @@ export interface NodeSemantics {
   readonly headingLevel: number | null;
 }
 
-/** Visual properties captured for ::before / ::after (conservative subset). */
+/**
+ * Visual properties captured for ::before / ::after.
+ *
+ * Phase 3 reconstruction emits these as `.pc-n<N>::before/::after` rules.
+ * `content` stores the computed (already quoted/escaped) content string;
+ * the remaining fields are optional so captures produced before Phase 3
+ * remain valid. All values pass reconstruction-side sanitization again.
+ */
 export interface PseudoElementStyle {
   readonly hasContent: boolean;
   readonly color: string | null;
   readonly backgroundColor: string | null;
   readonly backgroundImage: string | null;
+  /** Computed content string (e.g. `"•"`), when captured. */
+  readonly content?: string | null;
+  readonly display?: string | null;
+  readonly position?: string | null;
+  readonly top?: string | null;
+  readonly left?: string | null;
+  readonly width?: string | null;
+  readonly height?: string | null;
+  readonly fontSize?: string | null;
+  readonly fontWeight?: string | null;
+  readonly lineHeight?: string | null;
+  readonly border?: string | null;
+  readonly borderRadius?: string | null;
+  readonly transform?: string | null;
 }
 
 /**

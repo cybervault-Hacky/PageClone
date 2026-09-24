@@ -45,10 +45,23 @@ function readPseudo(
 
   return {
     hasContent,
+    content: hasContent ? read('content') : null,
     color: read('color'),
     backgroundColor: read('background-color'),
     backgroundImage:
       backgroundImage !== null && backgroundImage !== 'none' ? backgroundImage : null,
+    display: read('display'),
+    position: read('position'),
+    top: read('top'),
+    left: read('left'),
+    width: read('width'),
+    height: read('height'),
+    fontSize: read('font-size'),
+    fontWeight: read('font-weight'),
+    lineHeight: read('line-height'),
+    border: read('border'),
+    borderRadius: read('border-radius'),
+    transform: read('transform'),
   };
 }
 

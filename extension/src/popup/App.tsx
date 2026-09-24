@@ -5,6 +5,7 @@ import { Header } from './components/Header';
 import { IconRefresh } from './components/Icons';
 import { PageCard } from './components/PageCard';
 import { PrimaryAction } from './components/PrimaryAction';
+import { ReconstructPreview } from './components/ReconstructPreview';
 import { StatusNote } from './components/StatusNote';
 import { ANALYSIS_UNAVAILABLE_NOTICE, getStatusNote, toViewState } from './utils/viewState';
 
@@ -36,11 +37,13 @@ export function App({
 }: AppProps) {
   const view = toViewState(detection);
   const [notice, setNotice] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const viewKind = view.kind;
 
-  // A new view/phase invalidates any stale click notice.
+  // A new view/phase invalidates any stale click notice and open preview.
   useEffect(() => {
     setNotice(null);
+    setPreviewOpen(false);
   }, [viewKind, analysisPhase]);
 
   const handleAnalyze = useCallback(() => {
@@ -61,24 +64,40 @@ export function App({
   const showSummary = analysisPhase === 'ready' && captureResult !== null;
 
   return (
-    <div className="app-shell">
+    <div className={previewOpen ? 'app-shell app-shell--preview' : 'app-shell'}>
       <Header />
 
-      <main className="app-main">
-        <p className="lede">Capture the frontend of this page as a standalone project.</p>
+      {previewOpen && captureResult !== null ? (
+        <main className="app-main">
+          <ReconstructPreview result={captureResult} onClose={() => setPreviewOpen(false)} />
+        </main>
+      ) : (
+        <main className="app-main">
+          <p className="lede">Capture the frontend of this page as a standalone project.</p>
 
-        <section className="section" aria-labelledby="current-page-heading">
-          <h2 id="current-page-heading" className="section-label">
-            Current page
-          </h2>
-          <PageCard view={view} phase={analysisPhase} />
-        </section>
+          <section className="section" aria-labelledby="current-page-heading">
+            <h2 id="current-page-heading" className="section-label">
+              Current page
+            </h2>
+            <PageCard view={view} phase={analysisPhase} />
+          </section>
 
-        {showSummary && <AnalysisSummary result={captureResult} />}
+          {showSummary && <AnalysisSummary result={captureResult} />}
 
-        <PrimaryAction view={view} phase={analysisPhase} onAnalyze={handleAnalyze} />
-        <StatusNote text={note} />
-      </main>
+          {showSummary && (
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => setPreviewOpen(true)}
+            >
+              Reconstruct Preview
+            </button>
+          )}
+
+          <PrimaryAction view={view} phase={analysisPhase} onAnalyze={handleAnalyze} />
+          <StatusNote text={note} />
+        </main>
+      )}
 
       <footer className="app-footer">
         <button type="button" className="link-button" onClick={onRefresh}>

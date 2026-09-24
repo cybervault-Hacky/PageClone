@@ -3,11 +3,13 @@
  *
  * Phase 2 defines the contracts for detection, capture and the future export
  * pipeline. The capture model itself lives in `./capture` and is re-exported
- * here so consumers keep a single import surface.
+ * here so consumers keep a single import surface. Phase 3 adds the
+ * reconstruction model in `./reconstruct`.
  */
 import type { CaptureOptions, CaptureRequest } from './capture';
 
 export type * from './capture';
+export type * from './reconstruct';
 
 /** Identifies a web page the user wants to clone. */
 export interface PageTarget {
